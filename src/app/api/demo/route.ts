@@ -1,7 +1,8 @@
-// src/app/api/demo/route.ts
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { demoFormSchema } from '@/lib/validations';
-import { prisma } from '@/lib/db';
 import { ZodError } from 'zod';
 
 // Simple in-memory rate limit (use Redis in production)
@@ -9,7 +10,7 @@ const submissionTimestamps = new Map<string, number[]>();
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
-  const windowMs = 15 * 60 * 1000; // 15 minutes
+  const windowMs = 15 * 60 * 1000;
   const maxRequests = 3;
 
   const timestamps = submissionTimestamps.get(ip) || [];
@@ -24,8 +25,11 @@ function checkRateLimit(ip: string): boolean {
 
 export async function POST(request: NextRequest) {
   try {
-    // Rate limiting
-    const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+    const ip =
+      request.headers.get('x-forwarded-for') ||
+      request.headers.get('x-real-ip') ||
+      'unknown';
+
     if (!checkRateLimit(ip)) {
       return NextResponse.json(
         { success: false, message: 'Too many requests. Please try again in 15 minutes.' },
@@ -33,17 +37,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse and validate body
     const body = await request.json();
     const validatedData = demoFormSchema.parse(body);
 
-    // Anti-spam: check for bot patterns (honeypot fields, suspicious patterns)
     if (validatedData.companyWebsite && validatedData.companyWebsite.includes('localhost')) {
-      // Silently reject but appear successful
-      return NextResponse.json({ success: true, message: 'Demo request received.' }, { status: 200 });
+      return NextResponse.json(
+        { success: true, message: 'Demo request received.' },
+        { status: 200 }
+      );
     }
 
-    // Save to database
+    const { prisma } = await import('@/lib/db');
+
     const lead = await prisma.lead.create({
       data: {
         fullName: validatedData.fullName,
@@ -59,9 +64,6 @@ export async function POST(request: NextRequest) {
         status: 'NEW',
       },
     });
-
-    // TODO: Send email notification (add SMTP config to .env)
-    // await sendNotificationEmail(lead);
 
     return NextResponse.json(
       {
@@ -95,12 +97,14 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  // Admin-only endpoint to list leads
   const authHeader = request.headers.get('authorization');
   const adminSecret = process.env.ADMIN_SECRET;
 
   if (!adminSecret || authHeader !== `Bearer ${adminSecret}`) {
-    return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json(
+      { success: false, message: 'Unauthorized' },
+      { status: 401 }
+    );
   }
 
   try {
@@ -108,6 +112,8 @@ export async function GET(request: NextRequest) {
     const page = parseInt(url.searchParams.get('page') || '1');
     const limit = parseInt(url.searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
+
+    const { prisma } = await import('@/lib/db');
 
     const [leads, total] = await Promise.all([
       prisma.lead.findMany({
@@ -123,6 +129,10 @@ export async function GET(request: NextRequest) {
       data: { leads, total, page, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    return NextResponse.json({ success: false, message: 'Failed to fetch leads' }, { status: 500 });
+    console.error('[API/demo][GET] Error:', error);
+    return NextResponse.json(
+      { success: false, message: 'Failed to fetch leads' },
+      { status: 500 }
+    );
   }
 }
