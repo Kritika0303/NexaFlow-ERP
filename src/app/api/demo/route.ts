@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
           success: false,
           message: 'Validation failed. Please check your inputs.',
           errors: Object.fromEntries(
-            error.errors.map((e) => [e.path.join('.'), [e.message]])
+            error.issues.map((e) => [e.path.join('.'), [e.message]])
           ),
         },
         { status: 422 }
